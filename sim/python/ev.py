@@ -1,6 +1,6 @@
 import numpy as np
-from electricCosts import *
-from carTransitions import *
+from evCosts import *
+from evTransitions import *
 
 
 # electric vehicle mdp class
@@ -38,7 +38,7 @@ class evMDP:
         
         # Default Parameters
         self.transition_model = Residential
-        self.model_parameters = {}
+        self.model_parameters = {'base_seed': 1995}
         
         # Overrides
         if 'transition_model' in transitions.keys():
@@ -73,13 +73,13 @@ class evMDP:
         new_charges = state.charges + charge_change
         
         # clip at 1
-        new_charges = np.minimum(new_charges, 1)
+        new_charges = np.minimum(new_charges, 1.)
         
         # expected next state
         sp_expected = evState(state.t + self.dt, new_charges)
         
         # but cars may leave or arrive
-        sp = self.carChange(sp_expected)
+        sp = self.transition_model(sp_expected, self.model_parameters)
         
         # get reward
         reward = self.getReward(state,actions,sp)
