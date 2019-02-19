@@ -1,17 +1,37 @@
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+import pandas as pd
 
 def RealTime(t, modelGP = None):
     if modelGP is None:
         
         # fit real time-cost function from data, build GP model
-        pass
+        datafile = './data/NYISO-HourlyRealTime.csv'
+        modelGP = fitGP(datafile)
     
     cost = 0
     # sample from GP model
     return cost
 
+def fitGP(dataLoc):
+    df = pd.read_csv(dataLoc)
+    df[df.columns[1:]] = df[df.columns[1:]].replace('[\$,]','',regex=True).astype(float)
+    dates =  pd.to_datetime(df.iloc[:,0])
+    data = pd.DataFrame({'Date': dates.tolist(), 'Price': df.iloc[:,1].tolist()})
+    data['Hour'] = data['Date'].dt.hour
+    data['Weekday'] = data['Date'].dt.day_name
+    data['Month'] = data['Date'].dt.month
+    data.plot(x='Hour', y='Price')
+    
+    #data1 = data.pivot_table(index=data['Date'].dt.hour,values='Price')
+    #data1.plot()
+    a=1
+    
+    
+    return -1
+    
+    
 # returns price per kilowatt at time of use
 def TimeOfUse(t,model_name):
     
@@ -53,3 +73,8 @@ def getTerminalCost(s,a,sp):
             reward += np.log(finalcharge)
                 
     return reward
+
+if __name__ == '__main__':
+    datafile = './data/NYISO-HourlyRealTime.csv'
+    GP = fitGP(datafile)
+        
