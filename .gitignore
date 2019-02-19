@@ -1,0 +1,5 @@
+# ignore python package installations
+sim/python/env
+
+# ignore .pyc files
+sim/python/src/*.pyc
