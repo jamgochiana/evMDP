@@ -11,32 +11,41 @@ from matplotlib.colors import LogNorm
 import numpy as np
 
 
-def processData(folder):
+def processData(folder, filters=[]):
     df = aggregateDataFiles(folder)
     df = cleanData(df)
     
-    df = getWinterWeekdays(df)
-    #gpFun(df)
-    mixtureModel(df)
-    plt.show()
-    
+    for filterFunc, filterArgs in filters:
+        df = filterFunc(df,*filterArgs)
+
     return df
+
+"""
+
+"""
+def fitData(X, mixtures=range(1,6), hours=list(range(24)), plot=False):
+    gmms = mixtureModel(X,mixtures,hours,plot)
+    
+    if len(mixtures)==1:
+        gmms = gmms[0]
+    return gmms
 
 def aggregateDataFiles(folder):
     try:
-        filelist = os.listdir(folder)
+        filelist = os.listdir(os.path.join(os.getcwd(),folder))
     except:
         print("Invalid Directory")
         raise
     df_all = pd.DataFrame()
-    #print("[%s]" % (" " * len(filelist)))
-    #print(" ",end='')
-    for file in filelist:
+    
+    tenpercent = len(filelist)//10
+    print(len(filelist))
+    for iFile, file in enumerate(filelist):
         read_file = os.path.join(folder,file)
         df = readFile(read_file)
         df_all = df_all.append(df,ignore_index=True)
-        #print("#",end='')
-    #print(" ")
+        if (iFile+1) % tenpercent == 0:
+            print("%04.1d%% Done Reading Files" %(100.*(iFile+1.)/len(filelist)))
     return df_all
     
     
@@ -128,71 +137,79 @@ def gpFun(df):
                      y_mean + np.sqrt(np.diag(y_cov)),
                      alpha=0.5, color='k')
     plt.tight_layout()
-    
-#    # Plot LML landscape
-#    plt.figure(3)
-#    theta0 = np.logspace(-2, 3, 49)
-#    theta1 = np.logspace(-2, 0, 50)
-#    Theta0, Theta1 = np.meshgrid(theta0, theta1)
-#    LML = [[gp.log_marginal_likelihood(np.log([0.36, Theta0[i, j], Theta1[i, j]]))
-#            for i in range(Theta0.shape[0])] for j in range(Theta0.shape[1])]
-#    LML = np.array(LML).T
-#    
-#    vmin, vmax = (-LML).min(), (-LML).max()
-#    vmax = 50
-#    level = np.around(np.logspace(np.log10(vmin), np.log10(vmax), 50), decimals=1)
-#    plt.contour(Theta0, Theta1, -LML,
-#                levels=level, norm=LogNorm(vmin=vmin, vmax=vmax))
-#    plt.colorbar()
-#    plt.xscale("log")
-#    plt.yscale("log")
-#    plt.xlabel("Length-scale")
-#    plt.ylabel("Noise-level")
-#    plt.title("Log-marginal-likelihood")
-#    plt.tight_layout()
-    
-  
 
 
-def mixtureModel(df):
+def dataFromFrame(df,hours=None):
+    
+    # Get frame
     data = df.pivot(index='Date', columns='Hour', values='Demand')
     data = data.dropna()
-    X = data.values
-    
-    def plotBaseline(hours,gmm0):
-        plt.plot(hours, gmm0.means_[0,:], 'k', lw=3, zorder=9)
-        plt.fill_between(hours, gmm0.means_[0] - np.sqrt(np.diag(gmm0.covariances_[0])),
-                     gmm0.means_[0] + np.sqrt(np.diag(gmm0.covariances_[0])),
-                     alpha=0.5, color='k')
-    
-    def baseline(X,plot=True):
-        gmm0 = mixture.GaussianMixture(n_components=1, covariance_type='full').fit(X)
-        hours = np.arange(24)
+    X = (data.values).copy()
+    if hours is not None:
+        # temporary solution, not technically continuous stream from data but hopefully good enough 
+        X = reformatHours(X,hours)
+    return X
+
+def reformatHours(X,hours):
+    newIndices = hours % 24 
+    Xp = X[:,newIndices]
+    return Xp
+
+
+def mixtureModel(X, mixtures=range(1,6), hours=list(range(24)), plot=False):
+
+    gmm = [None]*len(mixtures) # preallocate
+    for iGMM, n in enumerate(mixtures):
+        gmm[iGMM] = mixture.GaussianMixture(n_components=n, covariance_type='full').fit(X)
         
         if plot:
-            plt.figure()
-            plotBaseline(hours,gmm0)
-            plt.plot(hours,X.T,'b')
-            plt.title('Demand Data')
-        return gmm0
-    
-    gmm0 = baseline(X)
-    
-    hours = np.arange(24)
-    for n in range(1,6):
-        gmm = mixture.GaussianMixture(n_components=n, covariance_type='full').fit(X)
-        demand_sampled, label_sampled = gmm.sample(n_samples=25)
+            samples = 25
+            demand_sampled, label_sampled = gmm[iGMM].sample(n_samples=samples)
         
-        plt.figure()
-        plotBaseline(hours,gmm0)
-        plt.plot(hours,demand_sampled.T)
-        plt.title('20 samples using %02d Gaussians to fit Demand Data' %(n))
+            plt.figure()
+            plotBaselineBackground(hours,gmm[0])
+            plt.plot(hours,demand_sampled.T)
+            plt.title('%02d samples using %02d Gaussians to fit Demand Data' %(samples,n))
+    
+    if plot:
+        plt.show()
+    return gmm
 
 def getWinterWeekdays(df):
     ww = df[df['Month']% 11 <= 2]
     ww = ww[ww['Weekday Num'] < 5]
     return ww
 
+def timeRange2Hours(timeRange):
+    return np.arange(timeRange[0],timeRange[-1]+1)
+
+def plotBaselineBackground(hours,gmm0):
+        plt.plot(hours, gmm0.means_[0,:], 'k', lw=3, zorder=9)
+        plt.fill_between(hours, gmm0.means_[0] - np.sqrt(np.diag(gmm0.covariances_[0])),
+                     gmm0.means_[0] + np.sqrt(np.diag(gmm0.covariances_[0])),
+                     alpha=0.5, color='k')
+
+
+def plotData(X,hours=np.arange(24),gmm0=None):
+    plt.figure()
+    if gmm0 is not None:
+        plotBaselineBackground(hours,gmm0)
+    plt.plot(hours,X.T,'b')
+    plt.title('Demand Data')
+    plt.show()
+
+
+
 if __name__ == "__main__":
     foldername = './data/CISO_ConsumptionData/'
-    df = processData(foldername)
+    
+    timeRange = [18,36]
+    hours = timeRange2Hours(timeRange)
+    # filters = [(filterTime,(hours,)),]
+
+    df = processData(foldername) #,filters)
+    X = dataFromFrame(df,hours)
+    print(X.shape)
+    gmm = fitData(X, range(1,5), hours, plot=True)
+    
+    plotData(X,gmm0=gmm[0])
