@@ -188,6 +188,9 @@ def plotData(X,hours=np.arange(24),gmm0=None):
 
 def filterTime(df,hours):
     assert hours[-1]-hours[0]<24
+    assert hours[0]>=0
+    assert hours[-1]>hours[0]
+    
     # dataFromFrame uses the following (index='Date', columns='Hour', values='Demand')
     # we must therefore make sure the 'Hour' field lies in range of hours
     
@@ -195,13 +198,16 @@ def filterTime(df,hours):
     shifted_hours = (df['Hour'].values - hours[0]) % 24 + hours[0]
     df['Hour'] = shifted_hours
     
-    # Reduce day by (hours // 24) days
-    day_shift = shifted_hours // 24
-    shifted_dates = df['Date'].copy()
-    for i, d in enumerate(day_shift.tolist()):
-        shifted_dates[i] -= datetime.timedelta(d)
-    df['Date'] = shifted_dates
+    # Reduce day by (hours // 24) days if the end of the range is in the next day
+    if hours[-1] >= 24:
+        day_shift = shifted_hours // 24
+        shifted_dates = df['Date'].copy()
+        for i, d in enumerate(day_shift.tolist()):
+            shifted_dates[i] -= datetime.timedelta(d)
+        df['Date'] = shifted_dates
 
+    # filter hour range
+    df = df[df['Hour']>=hours[0]]
     df = df[df['Hour']<=hours[-1]]
     return df
 
