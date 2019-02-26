@@ -1,13 +1,13 @@
 import os
 
 import pandas as pd
+import datetime
 
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 from sklearn import mixture
 
 from matplotlib import pyplot as plt
-from matplotlib.colors import LogNorm
 import numpy as np
 
 
@@ -139,22 +139,13 @@ def gpFun(df):
     plt.tight_layout()
 
 
-def dataFromFrame(df,hours=None):
+def dataFromFrame(df):
     
     # Get frame
     data = df.pivot(index='Date', columns='Hour', values='Demand')
     data = data.dropna()
     X = (data.values).copy()
-    if hours is not None:
-        # temporary solution, not technically continuous stream from data but hopefully good enough 
-        X = reformatHours(X,hours)
     return X
-
-def reformatHours(X,hours):
-    newIndices = hours % 24 
-    Xp = X[:,newIndices]
-    return Xp
-
 
 def mixtureModel(X, mixtures=range(1,6), hours=list(range(24)), plot=False):
 
@@ -171,8 +162,6 @@ def mixtureModel(X, mixtures=range(1,6), hours=list(range(24)), plot=False):
             plt.plot(hours,demand_sampled.T)
             plt.title('%02d samples using %02d Gaussians to fit Demand Data' %(samples,n))
     
-    if plot:
-        plt.show()
     return gmm
 
 def getWinterWeekdays(df):
@@ -196,20 +185,44 @@ def plotData(X,hours=np.arange(24),gmm0=None):
         plotBaselineBackground(hours,gmm0)
     plt.plot(hours,X.T,'b')
     plt.title('Demand Data')
-    plt.show()
 
+def filterTime(df,hours):
+    assert hours[-1]-hours[0]<24
+    # dataFromFrame uses the following (index='Date', columns='Hour', values='Demand')
+    # we must therefore make sure the 'Hour' field lies in range of hours
+    
+    # Change hours
+    shifted_hours = (df['Hour'].values - hours[0]) % 24 + hours[0]
+    df['Hour'] = shifted_hours
+    
+    # Reduce day by (hours // 24) days
+    day_shift = shifted_hours // 24
+    shifted_dates = df['Date'].copy()
+    for i, d in enumerate(day_shift.tolist()):
+        shifted_dates[i] -= datetime.timedelta(d)
+    df['Date'] = shifted_dates
+
+    df = df[df['Hour']<=hours[-1]]
+    return df
+
+def makeModel(timeRange=[0,23], dataFolder='./data/CISO_ConsumptionData/', mixtures=[4], plotSamples=False, plotAllData=False):
+    hours = timeRange2Hours(timeRange)
+    filters = [(filterTime,(hours,)),]
+
+    df = processData(dataFolder,filters)
+    X = dataFromFrame(df)
+
+    gmm = fitData(X, mixtures, hours, plotSamples)
+    if plotAllData:
+        plotData(X,hours,gmm0=gmm[0])
+
+    if plotAllData or plotSamples:
+        plt.show()
+    
+    return gmm    
 
 
 if __name__ == "__main__":
     foldername = './data/CISO_ConsumptionData/'
-    
-    timeRange = [18,36]
-    hours = timeRange2Hours(timeRange)
-    # filters = [(filterTime,(hours,)),]
-
-    df = processData(foldername) #,filters)
-    X = dataFromFrame(df,hours)
-    print(X.shape)
-    gmm = fitData(X, range(1,5), hours, plot=True)
-    
-    plotData(X,gmm0=gmm[0])
+    timeRange = [16,36]
+    gmm = makeModel(timeRange,foldername,range(1,5), True, True)
