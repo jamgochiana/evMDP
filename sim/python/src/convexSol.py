@@ -8,7 +8,7 @@ DEFAULT_PARAMS = {
     'cars': 100,
     'timeRange': [14, 34],
     'actRate': 1./4, 
-    'chargeRate': 1./5,
+    'chargeRate': 1./12, # level 1 full charge rate
     'lambda': 1e-2,
     'priceRise': 0.,
     'beta': 1.0,
@@ -52,7 +52,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
 
         pstar = prob.solve()
         policy = np.zeros((cars,actions))
-        policy[:,:] = a.value.astype('int8')
+        policy[:,:] = a.value.round()
 
         def backtrackDualReward(optimalReward,P,actions,dualWeight):
             electricity = -P.T.dot(actions)
@@ -82,12 +82,20 @@ def plotActionsAgainstPrice(time,price,actions):
     plt.plot(time,[price, actions])
     plt.show()
 
+def meanFieldChargeFromPolicy(policies,params):
+    charges = np.zeros(policies.shape)
+    charges[:,0] = params['mu_stCharge']
+    for i in range(1,charges.shape[1]):
+        charges[:,i] = charges[:,i-1] + params['actRate']*params['chargeRate']*policies[:,i-1]
+    return charges
+
 def noPriceChangeMeanFieldPareto():
 
     params = DEFAULT_PARAMS
     gmm = makeModel(timeRange=params['timeRange'])
     
-    lambdas = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1]
+    # Get policies 
+    lambdas = [1e-2,2e-2,3e-2,4e-2, 5e-2, 6e-2, 7e-2, 8e-2, 1e-1]
     rewards = np.zeros((2,len(lambdas)))
     policies = np.zeros((len(lambdas),80))
     for i, lam in enumerate(lambdas):
@@ -98,23 +106,38 @@ def noPriceChangeMeanFieldPareto():
         rewards[1,i] = reward['finalCharge']
         policies[i,:] = policy[1,:]
 
+    # Plot Pareto Front
     plt.figure()
     plt.plot(rewards[0,:], rewards[1,:])
     plt.title('Pareto Front for Mean Field Problem with no price changing')
     plt.xlabel('Electricity Costs')
     plt.ylabel('log(Final Car Charge)')
     
+    # Plot Policies
     PmeanHourly = MLEGMM(gmm)
     meanPrice = PmeanHourly.mean()
     xp = np.arange(params['timeRange'][0],params['timeRange'][-1]+1)
     x = np.arange(params['timeRange'][0],params['timeRange'][-1],params['actRate'])
     P = np.interp(x,xp,PmeanHourly)/meanPrice # normalize to make comparable on log scale
-    
+
     plt.figure()
     plt.plot(x,P)
-    plt.plot(x,policies[2])
+    plt.plot(x,policies.T)
     plt.legend('Normalized Electricity Cost', 'Charge Policies')
+    
+    # Plot Charge Levels
+    charges = meanFieldChargeFromPolicy(policies,params)
+    plt.figure()
+    plt.plot(x,P)
+    plt.plot(x,charges.T)
+    lambdalist = ['lambda=%05.2f' %(l) for l in lambdas]
+    plt.legend(['Normalized Electricity Cost']+lambdalist)
+    plt.title('Charge state over time for each lambda on pareto front')
+    plt.xlabel('Simulation Time (hr)')
+    plt.ylabel('Normalized Electricity Price, Charge State')
+
     plt.show()
+
 
 if __name__ == '__main__':
 
