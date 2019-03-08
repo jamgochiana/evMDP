@@ -5,20 +5,20 @@ from dataAggregator import *
 
 
 DEFAULT_PARAMS = {
-    'cars': 100,
-    'timeRange': [14, 34],
-    'actRate': 1./4, 
-    'chargeRate': 1./12, # level 1 full charge rate
-    'lambda': 1e-2,
-    'priceRise': 0.,
-    'beta': 1.0,
-    'mu_stCharge':0.4,
-    'std_stCharge':0.1,
-    'mu_arr':19,
-    'std_arr':2,
-    'mu_dep':31,
-    'std_dep':1,
-    'terminalFunc': (lambda x: cp.log(cp.minimum(1,x))),
+    'cars': 20,                 # number of cars
+    'timeRange': [14, 34],      # time range to run simulation
+    'actRate': 1./4,            # step time in hours
+    'chargeRate': 1./12,        # level 1 full charge rate
+    'lambda': 1e-2,             # dual function weight
+    'priceRise': 0.,            # amount (as a decimal percent) which the price rises when all cars are being charged
+    'beta': 1.0,                # exponentiate price by beta [CURRENTLY UNUSED]
+    'mu_stCharge':0.4,          # mean on starting charge level
+    'std_stCharge':0.1,         # standard deviation on starting charge level
+    'mu_arr':19,                # mean on arrival time
+    'std_arr':2,                # standard deviation on arrival time
+    'mu_dep':31,                # mean on departure time
+    'std_dep':1,                # standard deviation on departure time
+    'terminalFunc': (lambda x: cp.log(cp.minimum(1,x))),    # terminal reward function in terms of CVXPY atoms
 }
 
 def meanField(params=None,gmm=None,plotAgainstBase=False):
@@ -53,22 +53,69 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
         pstar = prob.solve()
         policy = np.zeros((cars,actions))
         policy[:,:] = a.value.round()
+        reward = backtrackDualReward(pstar,P,policy,params)
 
-        def backtrackDualReward(optimalReward,P,actions,dualWeight):
-            electricity = -P.T.dot(actions)
-            finalCharge = optimalReward-dualWeight*electricity
-            reward = {'totalReward':optimalReward, 'electricCosts':electricity,'finalCharge':finalCharge}
-            return reward
+        
+    else:
+        a = cp.Variable((cars,actions),boolean=True)
+        constraints = []
+        for i,t in enumerate(x):
+            if t < params['mu_arr'] or t >= params['mu_dep']:
+                constraints += [a[:,i]==0]
+        
+        # calculate reward
+        elec = 0
+        
+        # electricity costs
+        for i,t in enumerate(x):
+            elec -= P[i]*cp.sum(a[:,i]) + P[i]*params['priceRise']/cars*cp.sum(a[:,i])**2
 
-        reward = backtrackDualReward(pstar,P,a.value,params['lambda'])
+        # final charge costs
+        logcharge = 0
+        for i in range(cars):
+            logcharge += params['terminalFunc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a[i,:]))
+        
+        prob = cp.Problem(cp.Maximize(elec*params['lambda']+logcharge),constraints)
+        pstar = prob.solve()
+        policy = a.value
 
-        if plotAgainstBase:
-            plotActionsAgainstPrice(x,P,a.value)
+        reward = 0 #backtrackDualReward(pstar,P,policy,params)
+    
+    if plotAgainstBase:
+        # Plot Charge Levels
+        charges = meanFieldChargeFromPolicy(policy[0,:],params)
+        plotChargeAgainstPrice(x,P,charges)
 
-        return policy, reward
+    return policy, reward
 
-    print('Not yet implemented')
-    pass
+def backtrackDualReward(optimalReward,P,policy,params):
+    dualWeight=params['lambda']
+    
+    if params['beta']==1. and params['priceRise']==0.:
+        electricity = -P.T.dot(policy[0,:])
+        finalCharge = optimalReward-dualWeight*electricity
+        reward = {'totalReward':optimalReward, 'electricCosts':electricity,'finalCharge':finalCharge}
+    else:
+        electricity = -P.T.dot(policy)
+        finalCharge = optimalReward-dualWeight*electricity
+        
+
+
+        
+        tol = 1e-3
+        assert dualWeight*np.sum(electricity) + np.sum(finalCharge) - optimalReward < tol
+        
+        reward = {'totalReward':optimalReward, 'electricCosts':electricity.mean(),'finalCharge':finalCharge.mean()}
+        reward['finalChargeMin'] = np.min(finalCharge)
+        reward['finalChargeMax'] = np.max(finalCharge)
+        reward['finalChargeStd'] = np.std(finalCharge)
+        reward['electricityMin'] = np.min(electricity)
+        reward['electricityMax'] = np.max(electricity)
+        reward['electricityStd'] = np.std(electricity)
+        reward['averageRewardPerCar']=optimalReward / params['cars']
+    return reward
+
+
 
 def MLEGMM(gmm):
     return gmm.means_.T.dot(gmm.weights_)
@@ -77,9 +124,12 @@ def MLEGMM(gmm):
 def monteCarloPolicy():
     pass
 
-def plotActionsAgainstPrice(time,price,actions):
+def plotChargeAgainstPrice(time,price,charges):
     plt.figure()
-    plt.plot(time,[price, actions])
+    plt.plot(time,price)
+    plt.plot(time,charges.T)
+    plt.xlabel('Simulation Time (hr)')
+    plt.ylabel('Normalized Electricity Price, Charge State')
     plt.show()
 
 def meanFieldChargeFromPolicy(policies,params):
@@ -138,8 +188,25 @@ def noPriceChangeMeanFieldPareto():
 
     plt.show()
 
+def PriceChangeMeanFieldPareto():
+    params = DEFAULT_PARAMS
+    params['priceRise'] = 0.33 # 33% cost rise when all cars are being charged at once. Linear up to that point
+    gmm = makeModel(timeRange=params['timeRange'])
+    
+    # Get policies 
+    lambdas = [1e-2] # ,2e-2,3e-2,4e-2, 5e-2, 6e-2, 7e-2, 8e-2, 1e-1]
+    rewards = np.zeros((2,len(lambdas)))
+    policies = np.zeros((len(lambdas),80))
+    for i, lam in enumerate(lambdas):
+        print(lam)
+        params['lambda'] = lam 
+        policy, reward = meanField(gmm=gmm,params=params)
+        #rewards[0,i] = reward['electricCosts']
+        #rewards[1,i] = reward['finalCharge']
+        #policies[i,:] = policy[1,:]
+
 
 if __name__ == '__main__':
 
     noPriceChangeMeanFieldPareto()
-    
+    #PriceChangeMeanFieldPareto()
