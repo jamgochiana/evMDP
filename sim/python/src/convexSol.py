@@ -1,6 +1,7 @@
 import cvxpy as cp
 import numpy as np 
 import matplotlib.pyplot as plt
+from matplotlib import cm
 from dataAggregator import *
 
 
@@ -18,7 +19,7 @@ DEFAULT_PARAMS = {
     'std_arr':2,                # standard deviation on arrival time
     'mu_dep':31,                # mean on departure time
     'std_dep':1,                # standard deviation on departure time
-    'terminalFunc': (lambda x: cp.log(cp.minimum(1,x))),    # terminal reward function in terms of CVXPY atoms
+    'terminalFunc': (lambda x: cp.log(x)),    # terminal reward function in terms of CVXPY atoms
 }
 
 def meanField(params=None,gmm=None,plotAgainstBase=False):
@@ -47,7 +48,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
             if t < params['mu_arr'] or t >= params['mu_dep']:
                 constraints += [a[i]==0]
 
-        reward = -params['lambda']*P.T*a + params['terminalFunc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a))
+        reward = -params['lambda']*params['actRate']*P.T*a + params['terminalFunc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a))
         prob = cp.Problem(cp.Maximize(reward),constraints)
 
         pstar = prob.solve()
@@ -57,29 +58,48 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
 
         
     else:
-        a = cp.Variable((cars,actions),boolean=True)
         constraints = []
+        a = [cp.Variable(actions,boolean=True)]*cars
+        
+        ''' Code for continuous relaxation
+        a = [cp.Variable(actions)]*cars
+        
+        for c in range(cars):
+            for i in range(actions):
+                constraints += [a[c][i]>=0]
+                constraints += [a[c][i]<=1]
+        '''
         for i,t in enumerate(x):
             if t < params['mu_arr'] or t >= params['mu_dep']:
-                constraints += [a[:,i]==0]
+                for c in range(cars):
+                    constraints += [a[c][i]==0]
+        for c in range(cars):
+            constraints+=[params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a[c]) <= 1.0]
         
         # calculate reward
-        elec = 0
         
         # electricity costs
+        elec = 0
         for i,t in enumerate(x):
-            elec -= P[i]*cp.sum(a[:,i]) + P[i]*params['priceRise']/cars*cp.sum(a[:,i])**2
+            elec -= cp.sum([a[j][i] for j in range(cars)])*P[i]
+            elec -= cp.sum([a[j][i] for j in range(cars)])**2*P[i]*params['priceRise']/cars
 
         # final charge costs
         logcharge = 0
         for i in range(cars):
-            logcharge += params['terminalFunc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a[i,:]))
-        
-        prob = cp.Problem(cp.Maximize(elec*params['lambda']+logcharge),constraints)
-        pstar = prob.solve()
-        policy = a.value
+            logcharge += params['terminalFunc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a[i]))
 
-        reward = 0 #backtrackDualReward(pstar,P,policy,params)
+        total = params['actRate']*params['lambda']*elec + logcharge
+        prob = cp.Problem(cp.Maximize(total),constraints)
+        pstar = prob.solve(verbose=False,mi_max_iters=10000)
+        #pstar = prob.solve(solver=cp.SCS, verbose=True,max_iters=10000)
+        iters = prob.solver_stats.num_iters
+        print(iters)
+        solveTime = prob.solver_stats.solve_time
+        print(solveTime)
+        policy = np.array([a[i].value for i in range(cars)]).round()
+
+        reward = backtrackDualReward(pstar,P,policy,params)
     
     if plotAgainstBase:
         # Plot Charge Levels
@@ -90,32 +110,35 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
 
 def backtrackDualReward(optimalReward,P,policy,params):
     dualWeight=params['lambda']
-    
+    actRate = params['actRate']
     if params['beta']==1. and params['priceRise']==0.:
         electricity = -P.T.dot(policy[0,:])
-        finalCharge = optimalReward-dualWeight*electricity
+        finalCharge = optimalReward-dualWeight*actRate*electricity
         reward = {'totalReward':optimalReward, 'electricCosts':electricity,'finalCharge':finalCharge}
     else:
-        electricity = -P.T.dot(policy)
-        finalCharge = optimalReward-dualWeight*electricity
+        numCarsCharging=carsCharging(policy)
+        realPrice = P + params['priceRise']/params['cars']*P*numCarsCharging
         
-
-
+        electricity = -policy.dot(realPrice)
+        finalCharge = np.log(np.minimum(1,params['mu_stCharge']+params['actRate']*params['chargeRate']*policy.sum(axis=1)))
         
-        tol = 1e-3
-        assert dualWeight*np.sum(electricity) + np.sum(finalCharge) - optimalReward < tol
+        tol = 1e-2
+        assert dualWeight*actRate*np.sum(electricity) + np.sum(finalCharge) - optimalReward < tol
         
         reward = {'totalReward':optimalReward, 'electricCosts':electricity.mean(),'finalCharge':finalCharge.mean()}
-        reward['finalChargeMin'] = np.min(finalCharge)
-        reward['finalChargeMax'] = np.max(finalCharge)
-        reward['finalChargeStd'] = np.std(finalCharge)
-        reward['electricityMin'] = np.min(electricity)
-        reward['electricityMax'] = np.max(electricity)
-        reward['electricityStd'] = np.std(electricity)
-        reward['averageRewardPerCar']=optimalReward / params['cars']
+        reward['finalChargeMin'] = finalCharge.min()
+        reward['finalChargeMax'] = finalCharge.max()
+        reward['finalChargeStd'] = finalCharge.std()
+        reward['electricityMin'] = electricity.min()
+        reward['electricityMax'] = electricity.max()
+        reward['electricityStd'] = electricity.std()
+        reward['realElectricPrice'] = realPrice
+        reward['averageRewardPerCar'] = optimalReward / params['cars']
+        reward['numCarsCharging'] = numCarsCharging
     return reward
 
-
+def carsCharging(policy):
+    return policy.sum(axis=0)
 
 def MLEGMM(gmm):
     return gmm.means_.T.dot(gmm.weights_)
@@ -145,7 +168,7 @@ def noPriceChangeMeanFieldPareto():
     gmm = makeModel(timeRange=params['timeRange'])
     
     # Get policies 
-    lambdas = [1e-2,2e-2,3e-2,4e-2, 5e-2, 6e-2, 7e-2, 8e-2, 1e-1]
+    lambdas = [0.,.25e-2,.5e-2,.75e-2,1e-2, 1.25e-2, 1.5e-2, 1.75e-2, 2e-2, .25e-1]
     rewards = np.zeros((2,len(lambdas)))
     policies = np.zeros((len(lambdas),80))
     for i, lam in enumerate(lambdas):
@@ -190,23 +213,56 @@ def noPriceChangeMeanFieldPareto():
 
 def PriceChangeMeanFieldPareto():
     params = DEFAULT_PARAMS
-    params['priceRise'] = 0.33 # 33% cost rise when all cars are being charged at once. Linear up to that point
+    params['priceRise'] = 0.2 # 20% cost rise when all cars are being charged at once. Linear up to that point
+    #params['cars'] = 25
+    #params['terminalFunc'] =  lambda x: -cp.inv_pos(x)
     gmm = makeModel(timeRange=params['timeRange'])
     
     # Get policies 
-    lambdas = [1e-2] # ,2e-2,3e-2,4e-2, 5e-2, 6e-2, 7e-2, 8e-2, 1e-1]
+    lambdas = [0.5e-1,0.8e-1,0.9e-1, 1.0e-1, 1.2e-1, 1.5e-1, 2.0e-1, 2.2e-1 ] # good for log, 20%
+    #lambdas = [1e-2, 2e-2, 3e-2, 4e-2, 5e-2,6e-2,7e-2, 8e-2] # good for log, 100%
     rewards = np.zeros((2,len(lambdas)))
     policies = np.zeros((len(lambdas),80))
+    prices = np.zeros((len(lambdas),80))
     for i, lam in enumerate(lambdas):
         print(lam)
         params['lambda'] = lam 
         policy, reward = meanField(gmm=gmm,params=params)
-        #rewards[0,i] = reward['electricCosts']
-        #rewards[1,i] = reward['finalCharge']
-        #policies[i,:] = policy[1,:]
+        rewards[0,i] = reward['electricCosts']
+        rewards[1,i] = reward['finalCharge']
+        policies[i,:] = reward['numCarsCharging']/params['cars']
+        prices[i,:] = reward['realElectricPrice']
 
+    # Plot Pareto Front
+    plt.figure()
+    plt.plot(rewards[0,:], rewards[1,:])
+    plt.title('Pareto Front for Mean Field Problem with price changing')
+    plt.xlabel('Electricity Costs')
+    plt.ylabel('log(Final Car Charge)')
+    
+    # Plot Policies
+    PmeanHourly = MLEGMM(gmm)
+    meanPrice = PmeanHourly.mean()
+    xp = np.arange(params['timeRange'][0],params['timeRange'][-1]+1)
+    x = np.arange(params['timeRange'][0],params['timeRange'][-1],params['actRate'])
+    P = np.interp(x,xp,PmeanHourly)/meanPrice # normalize to make comparable on log scale
+
+    plt.figure()
+    plt.plot(x,P)
+
+    viridis = cm.get_cmap('viridis',len(lambdas))
+    for column1,color in zip(prices,viridis.colors):
+        plt.plot(x,column1,color=color)
+    for column2,color in zip(policies,viridis.colors):
+        plt.plot(x,column2,color=color)  
+    lambdalist = ['lambda=%05.2f' %(l) for l in lambdas]
+    plt.legend(['Normalized Electricity Cost']+lambdalist)
+    plt.title('Percentage of cars charging and adjusted electricity cost over time')
+    plt.xlabel('Time (hr)')
+    plt.ylabel('Percentage cars charging, adjusted electricity cost')
+    plt.show()
 
 if __name__ == '__main__':
 
-    noPriceChangeMeanFieldPareto()
-    #PriceChangeMeanFieldPareto()
+    #noPriceChangeMeanFieldPareto()
+    PriceChangeMeanFieldPareto()
