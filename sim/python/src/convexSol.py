@@ -59,16 +59,23 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
         
     else:
         constraints = []
-        a = [cp.Variable(actions,boolean=True)]*cars
+        #a = [cp.Variable(actions,boolean=True)]*cars
         
-        ''' Code for continuous relaxation
+        #''' Code for continuous relaxation
         a = [cp.Variable(actions)]*cars
         
+
         for c in range(cars):
             for i in range(actions):
                 constraints += [a[c][i]>=0]
                 constraints += [a[c][i]<=1]
+        #'''
         '''
+        carsCharging = cp.Variable(actions)
+        for i in range(actions):
+            constraints += [carsCharging[i] == cp.sum([a[c][i] for c in range(cars)])]
+        '''
+
         for i,t in enumerate(x):
             if t < params['mu_arr'] or t >= params['mu_dep']:
                 for c in range(cars):
@@ -80,24 +87,26 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
         
         # electricity costs
         elec = 0
+        fact = params['actRate']/float(cars)
         for i,t in enumerate(x):
-            elec -= cp.sum([a[j][i] for j in range(cars)])*P[i]
-            elec -= cp.sum([a[j][i] for j in range(cars)])**2*P[i]*params['priceRise']/cars
+            elec -= cp.sum([a[c][i] for c in range(cars)])    *P[i]*cars
+            elec -= cp.sum([a[c][i] for c in range(cars)])**2 * P[i]*params['priceRise']
+        elec = elec*fact
 
         # final charge costs
         logcharge = 0
         for i in range(cars):
             logcharge += params['terminalFunc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a[i]))
 
-        total = params['actRate']*params['lambda']*elec + logcharge
+        total = params['lambda']*elec + logcharge
         prob = cp.Problem(cp.Maximize(total),constraints)
-        pstar = prob.solve(verbose=False,mi_max_iters=10000)
-        #pstar = prob.solve(solver=cp.SCS, verbose=True,max_iters=10000)
+        #pstar = prob.solve(verbose=False,mi_max_iters=10000)
+        pstar = prob.solve(solver=cp.SCS, verbose=True,max_iters=20000)
         iters = prob.solver_stats.num_iters
         print(iters)
         solveTime = prob.solver_stats.solve_time
         print(solveTime)
-        policy = np.array([a[i].value for i in range(cars)]).round()
+        policy = np.array([a[i].value for i in range(cars)])
 
         reward = backtrackDualReward(pstar,P,policy,params)
     
@@ -119,11 +128,12 @@ def backtrackDualReward(optimalReward,P,policy,params):
         numCarsCharging=carsCharging(policy)
         realPrice = P + params['priceRise']/params['cars']*P*numCarsCharging
         
+        electricTimeCosts = realPrice*numCarsCharging
         electricity = -policy.dot(realPrice)
-        finalCharge = np.log(np.minimum(1,params['mu_stCharge']+params['actRate']*params['chargeRate']*policy.sum(axis=1)))
+        finalCharge = np.log(params['mu_stCharge']+params['actRate']*params['chargeRate']*policy.sum(axis=1))
         
         tol = 1e-2
-        assert dualWeight*actRate*np.sum(electricity) + np.sum(finalCharge) - optimalReward < tol
+        assert abs(dualWeight*actRate*np.sum(electricity) + np.sum(finalCharge) - optimalReward) < tol
         
         reward = {'totalReward':optimalReward, 'electricCosts':electricity.mean(),'finalCharge':finalCharge.mean()}
         reward['finalChargeMin'] = finalCharge.min()
@@ -213,14 +223,14 @@ def noPriceChangeMeanFieldPareto():
 
 def PriceChangeMeanFieldPareto():
     params = DEFAULT_PARAMS
-    params['priceRise'] = 0.2 # 20% cost rise when all cars are being charged at once. Linear up to that point
-    #params['cars'] = 25
+    params['priceRise'] = 0.20 # 20% cost rise when all cars are being charged at once. Linear up to that point
+    params['cars'] = 25
     #params['terminalFunc'] =  lambda x: -cp.inv_pos(x)
     gmm = makeModel(timeRange=params['timeRange'])
     
     # Get policies 
     lambdas = [0.5e-1,0.8e-1,0.9e-1, 1.0e-1, 1.2e-1, 1.5e-1, 2.0e-1, 2.2e-1 ] # good for log, 20%
-    #lambdas = [1e-2, 2e-2, 3e-2, 4e-2, 5e-2,6e-2,7e-2, 8e-2] # good for log, 100%
+    #lambdas = [2e-2, 3e-2, 4e-2, 5e-2,6e-2,7e-2, 8e-2] # good for log, 100%
     rewards = np.zeros((2,len(lambdas)))
     policies = np.zeros((len(lambdas),80))
     prices = np.zeros((len(lambdas),80))
