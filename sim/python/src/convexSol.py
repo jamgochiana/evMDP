@@ -19,7 +19,8 @@ DEFAULT_PARAMS = {
     'std_arr':2,                # standard deviation on arrival time
     'mu_dep':31,                # mean on departure time
     'std_dep':1,                # standard deviation on departure time
-    'terminalFunc': (lambda x: cp.log(x)),    # terminal reward function in terms of CVXPY atoms
+    'terminalFunc': (lambda x: -cp.inv_pos(x)),    # terminal reward function in terms of CVXPY atoms
+    'terminalFuncCalc': (lambda x: -1. / x),
 }
 
 def meanField(params=None,gmm=None,plotAgainstBase=False):
@@ -58,23 +59,31 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
 
         
     else:
+        relaxation = True
         constraints = []
-        #a = [cp.Variable(actions,boolean=True)]*cars
-        
-        #''' Code for continuous relaxation
-        a = [cp.Variable(actions)]*cars
-        
+        if not relaxation:
+            a = [cp.Variable(actions,boolean=True)]*cars
+            #for c in range(cars):
+            #    for i in range(actions):
+            #        constraints += [a[c][i]>=-0.1]
+            #        constraints += [a[c][i]<=1.1]
+        else:
+            params['cars'] = 1
+            cars = params['cars']
+            a = [cp.Variable(actions)]*cars
+            for c in range(cars):
+                for i in range(actions):
+                    constraints += [a[c][i]>=0]
+                    constraints += [a[c][i]<=1]
 
-        for c in range(cars):
-            for i in range(actions):
-                constraints += [a[c][i]>=0]
-                constraints += [a[c][i]<=1]
-        #'''
-        '''
+        
         carsCharging = cp.Variable(actions)
         for i in range(actions):
             constraints += [carsCharging[i] == cp.sum([a[c][i] for c in range(cars)])]
-        '''
+        
+        #realPrice = cp.Variable(actions)
+        #for i in range(actions):
+        #    constraints += [realPrice[i] == P[i]*(1 + params['priceRise']/cars*carsCharging[i])] 
 
         for i,t in enumerate(x):
             if t < params['mu_arr'] or t >= params['mu_dep']:
@@ -89,24 +98,30 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
         elec = 0
         fact = params['actRate']/float(cars)
         for i,t in enumerate(x):
-            elec -= cp.sum([a[c][i] for c in range(cars)])    *P[i]*cars
-            elec -= cp.sum([a[c][i] for c in range(cars)])**2 * P[i]*params['priceRise']
+            #elec -= carsCharging[i]*realPrice[i]
+            elec -= carsCharging[i]    *P[i]*cars
+            elec -= cp.square(carsCharging[i]) *P[i]*params['priceRise']
         elec = elec*fact
 
         # final charge costs
-        logcharge = 0
+        terminal = 0
         for i in range(cars):
-            logcharge += params['terminalFunc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*cp.sum(a[i]))
+            charge_i = params['mu_stCharge']
+            for j in range(actions):
+                charge_i += params['actRate']*params['chargeRate']*a[i][j]
+            terminal += params['terminalFunc'](charge_i)
 
-        total = params['lambda']*elec + logcharge
+        total = params['lambda']*elec + terminal
         prob = cp.Problem(cp.Maximize(total),constraints)
-        #pstar = prob.solve(verbose=False,mi_max_iters=10000)
-        pstar = prob.solve(solver=cp.SCS, verbose=True,max_iters=20000)
-        iters = prob.solver_stats.num_iters
-        print(iters)
-        solveTime = prob.solver_stats.solve_time
-        print(solveTime)
+        if not relaxation:
+            pstar = prob.solve(solver=cp.GUROBI, verbose=True)
+        else:
+            pstar = prob.solve(solver=cp.SCS, verbose=True, max_iters=20000)
         policy = np.array([a[i].value for i in range(cars)])
+
+        iters = prob.solver_stats.num_iters
+        solveTime = prob.solver_stats.solve_time
+        
 
         reward = backtrackDualReward(pstar,P,policy,params)
     
@@ -130,7 +145,7 @@ def backtrackDualReward(optimalReward,P,policy,params):
         
         electricTimeCosts = realPrice*numCarsCharging
         electricity = -policy.dot(realPrice)
-        finalCharge = np.log(params['mu_stCharge']+params['actRate']*params['chargeRate']*policy.sum(axis=1))
+        finalCharge = params['terminalFuncCalc'](params['mu_stCharge']+params['actRate']*params['chargeRate']*policy.sum(axis=1))
         
         tol = 1e-2
         assert abs(dualWeight*actRate*np.sum(electricity) + np.sum(finalCharge) - optimalReward) < tol
@@ -223,8 +238,8 @@ def noPriceChangeMeanFieldPareto():
 
 def PriceChangeMeanFieldPareto():
     params = DEFAULT_PARAMS
-    params['priceRise'] = 0.20 # 20% cost rise when all cars are being charged at once. Linear up to that point
-    params['cars'] = 25
+    params['priceRise'] = 1.0 # 20% cost rise when all cars are being charged at once. Linear up to that point
+    params['cars'] = 3
     #params['terminalFunc'] =  lambda x: -cp.inv_pos(x)
     gmm = makeModel(timeRange=params['timeRange'])
     
