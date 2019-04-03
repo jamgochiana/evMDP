@@ -65,10 +65,16 @@ class energyGMM(object):
     
     def std(self):
         """Returns the representative standard deviation of the maximum 
-        likelihood estimate of the GMM"""
+        likelihood estimate of the GMM
+        
+        Formula adapted from
+        https://stats.stackexchange.com/questions/16608/what-is-the-variance-of-the-weighted-mixture-of-two-gaussians
+        """
 
         weighted_cov = self.covariances_.T.dot(self.weights_)
-        return np.sqrt(np.diag(weighted_cov))
+        mean_contrib = (self.means_**2).T.dot(self.weights_) - self.mle()**2
+        variance = np.maximum(0,np.diag(weighted_cov)+mean_contrib)
+        return np.sqrt(variance)
 
     def posterior_std(self):
         """Returns the representative standard deviation of the maximum
@@ -76,8 +82,11 @@ class energyGMM(object):
 
         weighted_cov = self.posterior_covariances.T.dot(
             self.posterior_weights)
-        return np.sqrt(np.diag(weighted_cov))
-    
+        mean_contrib = (self.posterior_means**2).T.dot(self.posterior_weights) \
+            - self.posterior_mle()**2
+        variance = np.maximum(0,np.diag(weighted_cov)+mean_contrib)
+        return np.sqrt(variance)
+
     def sample(self,n_samples=1,seed=None):
         """Returns n_samples samples from the current distribution. Returns a 
         numpy array of size (n_samples,time_length)"""

@@ -9,7 +9,7 @@ from matplotlib.animation import FuncAnimation
 
 tr = [14, 34]
 time = np.arange(tr[0], tr[1]+1)
-seed_ = 2000
+seed_ = 1999
 try:
     os.mkdir("pics")
 except:
@@ -24,7 +24,7 @@ os.mkdir(seedpath)
 
 np.random.seed(seed_)
 
-gmm = dataAggregator.makeModel(timeRange=tr)
+gmm = dataAggregator.makeModel(timeRange=tr,mixtures=[5])
 
 eGMM = energyGMM(gmm)
 MLE = eGMM.mle()
@@ -84,6 +84,7 @@ def update(i):
     ax.fill_between(time, MLE2 - STD2, MLE2 + STD2, alpha=0.2, color='b')
     return line1, ax
 
+# must add custom init function, otherwise FuncAnimation will do first index twice
 def init():
     pass
 
