@@ -106,6 +106,25 @@ class energyGMM(object):
 
         return sample
 
+    def posterior_sample(self,n_samples=1,seed=None):
+        """Returns n_samples samples from the posterior distribution. Returns a 
+        numpy array of size (n_samples,time_length)"""
+
+        if seed:
+            np.random.seed(seed)
+
+        sample = np.zeros((n_samples, self.means_.shape[1]))
+
+        for i in range(n_samples):
+            
+            # pick which gaussian from weights
+            k = np.random.choice(self.posterior_means.shape[0], p=self.posterior_weights)
+
+            # sample from gaussian
+            sample[i,:] = np.random.multivariate_normal(self.posterior_means[k,:], self.posterior_covariances[k,:,:])
+
+        return sample
+
     def set_observations(self,observed):
         """Sets the observations variable and updates posterior distributions"""
         
