@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from dataAggregator import *
-
+from energyGMM import *
 
 DEFAULT_PARAMS = {
     'cars': 20,                 # number of cars
@@ -19,7 +19,7 @@ DEFAULT_PARAMS = {
     'std_arr':2,                # standard deviation on arrival time
     'mu_dep':31,                # mean on departure time
     'std_dep':1,                # standard deviation on departure time
-    'terminalFunc': (lambda x: -cp.inv_pos(x)),    # terminal reward function in terms of CVXPY atoms
+    'terminalFunc': (lambda x: -cp.inv_pos(x)),    # terminal reward function in terms of CVXPY atoms ### MUST BE SOCP-compatible for GUROBI
     'terminalFuncCalc': (lambda x: -1. / x),
 }
 
@@ -31,14 +31,13 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
     if gmm is None:
         gmm = makeModel(timeRange=params['timeRange'])
 
-    PmeanHourly = MLEGMM(gmm)
-    meanPrice = PmeanHourly.mean() 
+    eGMM = energyGMM(gmm)
 
     actions = int((params['timeRange'][-1]-params['timeRange'][0])/params['actRate'])
     cars = params['cars']
     xp = np.arange(params['timeRange'][0],params['timeRange'][-1]+1)
     x = np.arange(params['timeRange'][0],params['timeRange'][-1],params['actRate'])
-    P = np.interp(x,xp,PmeanHourly)/meanPrice # normalize to make comparable on log scale
+    P = np.interp(x,xp,eGMM.mle()) # normalize to make comparable on log scale
 
     # If beta is 1 and the price rise rate is 0, mf problem is solvable for each car individually
     if params['beta']==1. and params['priceRise']==0.:
@@ -59,7 +58,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
 
         
     else:
-        relaxation = True
+        relaxation = False
         constraints = []
         if not relaxation:
             a = cp.Variable((cars,actions),boolean=True)
@@ -98,7 +97,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
         total = params['lambda']*elec + terminal
         prob = cp.Problem(cp.Maximize(total),constraints)
         if not relaxation:
-            pstar = prob.solve(solver=cp.GUROBI, verbose=True,TimeLimit=60.)
+            pstar = prob.solve(solver=cp.GUROBI, verbose=True,TimeLimit=10.)
         else:
             pstar = prob.solve(solver=cp.SCS, verbose=True, max_iters=20000)
         
@@ -175,7 +174,8 @@ def noPriceChangeMeanFieldPareto():
 
     params = DEFAULT_PARAMS
     gmm = makeModel(timeRange=params['timeRange'])
-    
+    eGMM = energyGMM(gmm)
+
     # Get policies 
     lambdas = [0.,.25e-2,.5e-2,.75e-2,1e-2, 1.25e-2, 1.5e-2, 1.75e-2, 2e-2, .25e-1]
     rewards = np.zeros((2,len(lambdas)))
@@ -196,11 +196,10 @@ def noPriceChangeMeanFieldPareto():
     plt.ylabel('log(Final Car Charge)')
     
     # Plot Policies
-    PmeanHourly = MLEGMM(gmm)
-    meanPrice = PmeanHourly.mean()
+
     xp = np.arange(params['timeRange'][0],params['timeRange'][-1]+1)
     x = np.arange(params['timeRange'][0],params['timeRange'][-1],params['actRate'])
-    P = np.interp(x,xp,PmeanHourly)/meanPrice # normalize to make comparable on log scale
+    P = np.interp(x,xp,eGMM.mle()) # normalize to make comparable on log scale
 
     plt.figure()
     plt.plot(x,P)
@@ -225,7 +224,8 @@ def PriceChangeMeanFieldPareto():
     params['priceRise'] = 0.2 # 20% cost rise when all cars are being charged at once. Linear up to that point
     params['cars'] = 100
     gmm = makeModel(timeRange=params['timeRange'])
-    
+    eGMM = energyGMM(gmm)
+
     # Get policies 
     lambdas = [0.5e-1,0.8e-1,0.9e-1, 1.0e-1, 1.2e-1, 1.5e-1, 2.0e-1, 2.2e-1 ] # good for log, 20%
     #lambdas = [2e-2, 3e-2, 4e-2, 5e-2,6e-2,7e-2, 8e-2] # good for log, 100%
@@ -253,7 +253,7 @@ def PriceChangeMeanFieldPareto():
     meanPrice = PmeanHourly.mean()
     xp = np.arange(params['timeRange'][0],params['timeRange'][-1]+1)
     x = np.arange(params['timeRange'][0],params['timeRange'][-1],params['actRate'])
-    P = np.interp(x,xp,PmeanHourly)/meanPrice # normalize to make comparable on log scale
+    P = np.interp(x,xp,eGMM.mle()) # normalize to make comparable on log scale
 
     plt.figure()
     plt.plot(x,P)
