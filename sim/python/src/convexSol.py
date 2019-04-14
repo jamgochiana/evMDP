@@ -31,7 +31,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
     if gmm is None:
         gmm = makeModel(timeRange=params['timeRange'])
 
-    eGMM = energyGMM(gmm)
+    eGMM = energyGMM(gmm, time_range=params['timeRange'])
 
     actions = int((params['timeRange'][-1]-params['timeRange'][0])/params['actRate'])
     cars = params['cars']
@@ -58,7 +58,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
 
         
     else:
-        relaxation = False
+        relaxation = True
         constraints = []
         if not relaxation:
             a = cp.Variable((cars,actions),boolean=True)
@@ -83,7 +83,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
         fact = params['actRate']/float(cars)
         for i,t in enumerate(x):
             elec -= cp.sum(a[:,i])    *P[i]*cars
-            elec -= cp.quad_form(a[:,i],np.ones((cars,cars)))*P[i]*params['priceRise']
+            elec -= cp.quad_form(a[:,i],np.ones((cars,cars)))*params['priceRise']
         elec = elec*fact
 
         # final charge costs
@@ -174,7 +174,7 @@ def noPriceChangeMeanFieldPareto():
 
     params = DEFAULT_PARAMS
     gmm = makeModel(timeRange=params['timeRange'])
-    eGMM = energyGMM(gmm)
+    eGMM = energyGMM(gmm, time_range=params['timeRange'])
 
     # Get policies 
     lambdas = [0.,.25e-2,.5e-2,.75e-2,1e-2, 1.25e-2, 1.5e-2, 1.75e-2, 2e-2, .25e-1]
@@ -224,7 +224,7 @@ def PriceChangeMeanFieldPareto():
     params['priceRise'] = 0.2 # 20% cost rise when all cars are being charged at once. Linear up to that point
     params['cars'] = 100
     gmm = makeModel(timeRange=params['timeRange'])
-    eGMM = energyGMM(gmm)
+    eGMM = energyGMM(gmm, time_range=params['timeRange'])
 
     # Get policies 
     lambdas = [0.5e-1,0.8e-1,0.9e-1, 1.0e-1, 1.2e-1, 1.5e-1, 2.0e-1, 2.2e-1 ] # good for log, 20%

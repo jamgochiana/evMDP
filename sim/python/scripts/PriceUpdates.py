@@ -26,7 +26,7 @@ np.random.seed(seed_)
 
 gmm = dataAggregator.makeModel(timeRange=tr,mixtures=[5])
 
-eGMM = energyGMM(gmm)
+eGMM = energyGMM(gmm, time_range=tr)
 MLE = eGMM.mle()
 STD = eGMM.std()
 

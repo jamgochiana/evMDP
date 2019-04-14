@@ -10,6 +10,13 @@ class energyGMM(object):
         weights_
         means_
         covariances_
+        
+        time_range
+
+        observations
+        posterior_weights
+        posterior_means
+        posterior_covariances
 
 
     To use:
@@ -26,7 +33,7 @@ class energyGMM(object):
 
     """
 
-    def __init__(self,gmm,normalize=True):
+    def __init__(self,gmm,time_range,normalize=True):
         """Initializes mixture model class."""
 
         # take from gmm class
@@ -34,6 +41,10 @@ class energyGMM(object):
         self.means_ = gmm.means_
         self.covariances_ = gmm.covariances_
         
+        self.time_range = np.arange(time_range[0], time_range[1]+1)
+        if len(self.time_range) != self.means_.shape[1]:
+            raise ValueError('Incorrect size time range')
+
         # normalize price to mean MLE of 1. by default 
         if normalize:
 
@@ -195,7 +206,7 @@ class energyGMM(object):
 if __name__ == '__main__':
     import dataAggregator
     gmm = dataAggregator.makeModel(timeRange=[14,34])
-    eGMM = energyGMM(gmm)
+    eGMM = energyGMM(gmm, time_range=[14,34])
     print(eGMM.mle())
     print(eGMM.std())
     print(eGMM.sample())
