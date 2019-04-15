@@ -61,15 +61,21 @@ class evMPC(object):
         # add check for energyGMM demand model
         self.demand_model = demand_model
         
-        self.end_times = end_times
+        if isinstance(end_times,(int,float)):
+            self.end_times = np.array([end_times]*cars)
+        elif isinstance(charge, np.ndarray):
+            self.end_times = end_times
+        else:
+            raise ValueError('Incorrect end_times type')
+        
         self.rise = rise 
         self.eta = eta 
         
         self.past_times = np.empty((0,), float)
         self.actions_taken = np.empty((cars,0), int)
         
-        self.times_remaining = np.arange(t, end_times.max())
-        self.actions_remaining = np.zeros((cars,len(self.times_remaining))
+        self.times_remaining = np.arange(t, self.end_times.max())
+        self.actions_remaining = np.zeros((cars,len(self.times_remaining)))
 
     def step(self, observations, dt, relaxation=False, solver=cp.GUROBI):
         """Perform MPC up through the next observed base demand
@@ -94,7 +100,7 @@ class evMPC(object):
         if solver == cp.SCS:
             solver_kwargs = {'max_iters': 20000} 
         elif solver == cp.GUROBI:
-            solver_kwargs = {'TimeLimit': 10.} 
+            solver_kwargs = {'TimeLimit': 20.} 
 
         # update demand model with observations
         self.demand_model = self.demand_model.observe(observations)
@@ -109,7 +115,7 @@ class evMPC(object):
         prob = cp.Problem(cp.Minimize(cost), constraints)
 
         # solve optimization problem
-        pstar = prob.solve(solver=solver, **solver_kwargs)
+        pstar = prob.solve(solver=solver, verbose=True, **solver_kwargs)
         policy = var.value
 
         # decide actions to take now vs. store for later as reference
@@ -128,9 +134,12 @@ class evMPC(object):
         # update charge state with actions
         self.charge_state.update(actions, dt)
         
-    def simulate(self):
+    def simulate(self, base_demand, dt):
         """Simulate MPC through end times"""
-        pass
+        
+        for observation in base_demand:
+            self.step(observation, dt)
+
     
     def total_demand(self):
         """Return both past and future estimated total demand
@@ -143,9 +152,9 @@ class evMPC(object):
         """
 
         past_base_demand = np.interp(self.past_times,
-            self.demand_model.times, self.demand_model.posterior_mle())
+            self.demand_model.time_range, self.demand_model.posterior_mle())
         future_base_demand = np.interp(self.times_remaining,
-            self.demand_model.times, self.demand_model.posterior_mle())
+            self.demand_model.time_range, self.demand_model.posterior_mle())
 
         past_total_demand = past_base_demand+self.rise*self.actions_taken.sum(
             axis=0)
@@ -165,7 +174,7 @@ class evMPC(object):
             future: (2, # future timesteps)-sized array with the first row
                 w/ future timesteps, and the second row w/ ratio of cars charging
         """
-        
+
         past_ratio = self.actions_taken.sum(
             axis=0) / self.actions_taken.shape[0]
         future_ratio = self.actions_remaining.sum(
