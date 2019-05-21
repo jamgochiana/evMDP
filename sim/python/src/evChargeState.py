@@ -170,3 +170,47 @@ class evChargeState(object):
         cost = eta*elec + terminal
 
         return var, cost, constraints
+
+    def simulated_cost(self, D, rise, eta, dt, actions):
+        """Generates costs for determined action sequence.
+
+        Args:
+            D: A (2, # hours) numpy array, where the second row is the 
+                expected value of base demand and the first row is the times 
+                which those demands line up with.
+            rise: individual demand rise per car
+            eta: dual value multiplier (applied to electricity demand)
+            dt: time step over which to perform each action
+            actions: A (C,T) numpy array of charge actions taken
+
+        Returns:
+            electric_cost - total electric cost
+            terminal_cost - total terminal cost
+            total_cost - appropriately weighted sum
+
+        """
+
+        c, a = actions.shape
+
+        # generate true (interpolated) demand price curve
+        times = self.t + np.arange(0, a*dt, dt)
+        P = np.interp(times, D[0,:], D[1,:])
+
+        # electricity costs
+        electric_cost = 0
+        for i in range(a):
+            electric_cost += np.sum(actions[:,i])*P[i]
+            electric_cost += rise*np.sum(actions[:,i])**2
+        electric_cost *= dt
+
+        # terminal costs
+        terminal_cost = 0
+        for i in range(c):
+            charge_i = self.charge[i]
+            for j in range(a):
+                charge_i += dt*self.charge_rate[i]*actions[i,j]
+            terminal_cost += 1.0/charge_i - 1
+
+        total_cost = eta*electric_cost + terminal_cost
+
+        return electric_cost, terminal_cost, total_cost

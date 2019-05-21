@@ -40,6 +40,10 @@ ln2, = plt.plot([],[])
 ln3, = plt.plot([],[])
 ln4, = plt.plot([],[])
 ln5, = plt.plot([],[])
+ax.set_xlabel('Time (hr)')
+ax.set_ylabel('Cars Charging (%), Demand')
+fig.suptitle('Past/Predicted Charging w/ MPC')
+
 if not baseline:
     MLE = mpc.demand_model.posterior_mle()
     STD = mpc.demand_model.posterior_std()

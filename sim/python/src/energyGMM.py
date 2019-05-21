@@ -37,9 +37,9 @@ class energyGMM(object):
         """Initializes mixture model class."""
 
         # take from gmm class
-        self.weights_ = gmm.weights_
-        self.means_ = gmm.means_
-        self.covariances_ = gmm.covariances_
+        self.weights_ = gmm.weights_.copy()
+        self.means_ = gmm.means_.copy()
+        self.covariances_ = gmm.covariances_.copy()
         
         self.time_range = np.arange(time_range[0], time_range[1]+1)
         if len(self.time_range) != self.means_.shape[1]:
@@ -60,9 +60,9 @@ class energyGMM(object):
         self.observations = np.array([])
 
         # initialize posterior distribution to initial distribution
-        self.posterior_weights = self.weights_
-        self.posterior_means = self.means_
-        self.posterior_covariances = self.covariances_
+        self.posterior_weights = self.weights_.copy()
+        self.posterior_means = self.means_.copy()
+        self.posterior_covariances = self.covariances_.copy()
     
     def mle(self):
         """Returns the maximum likelihood estimate of the prices"""

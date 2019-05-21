@@ -76,6 +76,9 @@ class evMPC(object):
         
         self.times_remaining = np.arange(t, self.end_times.max())
         self.actions_remaining = np.zeros((cars,len(self.times_remaining)))
+        
+        # DO NOT UPDATE - USED FOR EVALUATION 
+        self.init_charge_state = evChargeState(t, cars, charge, charge_rate)
 
     def step(self, observations, dt, relaxation=False, solver=cp.GUROBI):
         """Perform MPC up through the next observed base demand
@@ -100,7 +103,7 @@ class evMPC(object):
         if solver == cp.SCS:
             solver_kwargs = {'max_iters': 20000} 
         elif solver == cp.GUROBI:
-            solver_kwargs = {'TimeLimit': 20.} 
+            solver_kwargs = {'TimeLimit': 30.} 
 
         # update demand model with observations
         self.demand_model = self.demand_model.observe(observations)
@@ -138,7 +141,8 @@ class evMPC(object):
         """Simulate MPC through end times"""
         
         for observation in base_demand:
-            self.step(observation, dt)
+            if len(self.times_remaining) > 0:
+                self.step(observation, dt)
 
     
     def total_demand(self):
@@ -183,3 +187,29 @@ class evMPC(object):
         past = np.vstack((self.past_times, past_ratio))
         future = np.vstack((self.times_remaining,future_ratio))
         return past, future
+
+    def simulated_costs(self):
+        """Calculates the costs of a set of actions in simulation
+
+        Returns:
+            electric_cost - total electric cost
+            terminal_cost - total terminal cost
+            total_cost - appropriately weighted sum
+
+        Raises:
+            ValueError if called before simulation done
+        """  
+        
+        if len(self.times_remaining) > 0:
+            raise ValueError('Simulation not done, cannot get costs')
+
+
+        actions = self.actions_taken
+        ics = self.init_charge_state
+        rise = self.rise
+        eta = self.eta
+        dt = (np.diff(self.past_times)).mean()
+        D = np.vstack(
+            (self.demand_model.time_range, self.demand_model.posterior_mle()))
+
+        return ics.simulated_cost(D, rise, eta, dt, actions)

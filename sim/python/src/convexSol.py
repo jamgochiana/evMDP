@@ -7,7 +7,7 @@ from energyGMM import *
 
 DEFAULT_PARAMS = {
     'cars': 20,                 # number of cars
-    'timeRange': [14, 34],      # time range to run simulation
+    'timeRange': [18, 32],      # time range to run simulation
     'actRate': 1./4,            # step time in hours
     'chargeRate': 1./12,        # level 1 full charge rate
     'lambda': 1e-2,             # dual function weight
@@ -58,7 +58,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
 
         
     else:
-        relaxation = True
+        relaxation = False
         constraints = []
         if not relaxation:
             a = cp.Variable((cars,actions),boolean=True)
@@ -97,7 +97,7 @@ def meanField(params=None,gmm=None,plotAgainstBase=False):
         total = params['lambda']*elec + terminal
         prob = cp.Problem(cp.Maximize(total),constraints)
         if not relaxation:
-            pstar = prob.solve(solver=cp.GUROBI, verbose=True,TimeLimit=10.)
+            pstar = prob.solve(solver=cp.GUROBI, verbose=True,TimeLimit=30.)
         else:
             pstar = prob.solve(solver=cp.SCS, verbose=True, max_iters=20000)
         
@@ -124,7 +124,7 @@ def backtrackDualReward(optimalReward,P,policy,params):
         reward = {'totalReward':optimalReward, 'electricCosts':electricity,'finalCharge':finalCharge}
     else:
         numCarsCharging=carsCharging(policy)
-        realPrice = P + params['priceRise']/params['cars']*P*numCarsCharging
+        realPrice = P + params['priceRise']/params['cars']*numCarsCharging
         
         electricTimeCosts = realPrice*numCarsCharging
         electricity = -policy.dot(realPrice)
@@ -222,16 +222,16 @@ def noPriceChangeMeanFieldPareto():
 def PriceChangeMeanFieldPareto():
     params = DEFAULT_PARAMS
     params['priceRise'] = 0.2 # 20% cost rise when all cars are being charged at once. Linear up to that point
-    params['cars'] = 100
+    params['cars'] = 10
     gmm = makeModel(timeRange=params['timeRange'])
     eGMM = energyGMM(gmm, time_range=params['timeRange'])
 
     # Get policies 
-    lambdas = [0.5e-1,0.8e-1,0.9e-1, 1.0e-1, 1.2e-1, 1.5e-1, 2.0e-1, 2.2e-1 ] # good for log, 20%
-    #lambdas = [2e-2, 3e-2, 4e-2, 5e-2,6e-2,7e-2, 8e-2] # good for log, 100%
+    lambdas = [0.5e-1]#,0.8e-1,0.9e-1, 1.0e-1, 1.2e-1, 1.5e-1, 2.0e-1, 2.2e-1 ] # good for 1/x, 20%
+    #lambdas = [2e-2, 3e-2, 4e-2, 5e-2,6e-2,7e-2, 8e-2] # good for -1/x, 100%
     rewards = np.zeros((2,len(lambdas)))
-    policies = np.zeros((len(lambdas),80))
-    prices = np.zeros((len(lambdas),80))
+    policies = np.zeros((len(lambdas),int((len(eGMM.time_range)-1)/params['actRate'])))
+    prices = np.zeros((len(lambdas),int((len(eGMM.time_range)-1)/params['actRate'])))
     for i, lam in enumerate(lambdas):
         print(lam)
         params['lambda'] = lam 
@@ -240,6 +240,21 @@ def PriceChangeMeanFieldPareto():
         rewards[1,i] = reward['finalCharge']
         policies[i,:] = reward['numCarsCharging']/params['cars']
         prices[i,:] = reward['realElectricPrice']
+        if i == 0 and params['cars'] == 10:
+            # plot charging heatmap
+            left = 17.875
+            right = 31.875
+            bottom = 10.5
+            top = 0.5
+            extent = [left, right, bottom, top]
+
+            plt.figure()
+            plt.xlabel('Time (hr)')
+            plt.ylabel('Car')
+            plt.title('Charging Policy with 10 Cars')
+            actions = policy*np.array([np.arange(1,1+params['cars'])]).T
+            plt.imshow(actions, cmap='nipy_spectral', interpolation='nearest', extent = extent, aspect=0.25)
+
 
     # Plot Pareto Front
     plt.figure()
@@ -262,9 +277,9 @@ def PriceChangeMeanFieldPareto():
     for column1,color in zip(prices,viridis.colors):
         plt.plot(x,column1,color=color)
     for column2,color in zip(policies,viridis.colors):
-        plt.plot(x,column2,color=color)  
+        plt.plot(x,column2,color=color,linestyle='-.')  
     lambdalist = ['lambda=%05.2f' %(l) for l in lambdas]
-    plt.legend(['Normalized Electricity Cost']+lambdalist)
+    plt.legend(['Normalized Electricity Cost']+lambdalist, loc='lower right')
     plt.title('Percentage of cars charging and adjusted electricity cost over time')
     plt.xlabel('Time (hr)')
     plt.ylabel('Percentage cars charging, adjusted electricity cost')
