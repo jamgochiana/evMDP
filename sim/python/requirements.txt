@@ -21,7 +21,7 @@ multiprocess==0.70.7
 numpy==1.16.2
 osqp==0.5.0
 pandas==0.24.1
-Pillow==5.4.1
+Pillow==9.0.1
 pyglet==1.3.2
 pylint==2.2.2
 PyOpenGL==3.1.0
