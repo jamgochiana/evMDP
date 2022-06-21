@@ -18,7 +18,7 @@ matplotlib==3.0.2
 matplotlib2tikz==0.7.4
 mccabe==0.6.1
 multiprocess==0.70.7
-numpy==1.16.2
+numpy==1.22.0
 osqp==0.5.0
 pandas==0.24.1
 Pillow==5.4.1
