@@ -1,6 +1,6 @@
 astroid==2.1.0
 atari-py==0.1.7
-certifi==2018.11.29
+certifi==2022.12.7
 chardet==3.0.4
 cvxpy==1.0.18
 cycler==0.10.0
